@@ -1,0 +1,12 @@
+SYNTHETIC HOSPITAL BILL — FOR DEMONSTRATION ONLY
+Invoice number: DEMO-1001
+Service date: 2026-09-12
+
+Description              Quantity    Unit Price (INR)    Total (INR)
+Room Charges              1           15000               15000
+Laboratory Tests          1           8000                8000
+Medicine A                1           2000                2000
+Medicine A                1           2000                2000
+
+TOTAL BILLED: INR 27000
+All names, dates, and amounts are fictional.
