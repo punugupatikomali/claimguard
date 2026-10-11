@@ -2,7 +2,7 @@
 from __future__ import annotations
 import re
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from difflib import SequenceMatcher
 from typing import Any
 
@@ -43,24 +43,52 @@ def _page_for_quote(quote: str, policy_text: str) -> int | None:
 
 
 def _severity(category: str, amount: float) -> str:
-    if category in {"duplicate", "excluded_service", "room_limit"} and amount >= 5000:
+    if category in {"duplicate", "excluded_service", "room_limit", "total_mismatch"} and amount >= 5000:
         return "High"
-    if category in {"duplicate", "excluded_service", "room_limit", "arithmetic"}:
+    if category in {"duplicate", "excluded_service", "room_limit", "arithmetic", "total_mismatch"}:
         return "Medium"
     return "Low"
+
+
+def _parse_date(value: Any) -> date | None:
+    text = str(value or "").strip()
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y", "%d %b %Y", "%d %B %Y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _resolve_covered_days(covered_days: int | None, claim_info: dict[str, Any], items: list[dict[str, Any]], room_indexes: list[int]) -> tuple[int, str]:
+    """Use the reviewer's number when given; otherwise derive the stay from the bill."""
+    if covered_days:
+        return max(1, int(covered_days)), "entered by reviewer"
+    admitted, discharged = _parse_date(claim_info.get("admission_date")), _parse_date(claim_info.get("discharge_date"))
+    if admitted and discharged and discharged >= admitted:
+        return max(1, (discharged - admitted).days), f"admission {admitted} to discharge {discharged}"
+    room_quantity = sum(items[i]["quantity"] for i in room_indexes)
+    if room_quantity >= 1:
+        return int(round(room_quantity)), "quantity on room-charge lines"
+    return 1, "default (no stay dates found)"
 
 
 def build_audit_report(
     bill_items: list[dict[str, Any]],
     policy_rules: list[dict[str, Any]],
-    covered_days: int = 1,
+    covered_days: int | None = 1,
     policy_text: str = "",
     notes: list[str] | None = None,
     source_mode: str = "AI audit",
+    claim_info: dict[str, Any] | None = None,
+    observations: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Build an evidence-aware report with transparent and non-overlapping exposure calculations."""
+    """Build an evidence-aware report with transparent and non-overlapping exposure calculations.
+
+    Pass covered_days=None (or 0) to derive the stay length from claim_info dates or room quantities.
+    """
     notes = list(notes or [])
-    covered_days = max(1, int(covered_days))
+    claim_info = dict(claim_info or {})
     items: list[dict[str, Any]] = []
     for raw in bill_items:
         item = dict(raw)
@@ -72,6 +100,9 @@ def build_audit_report(
         items.append(item)
 
     total_billed = round(sum(x["total"] for x in items), 2)
+    room_indexes = [i for i, item in enumerate(items)
+                    if item.get("category") == "room" or any(k in item["description"].lower() for k in ("room charge", "room rent", "room accommodation", "ward charge"))]
+    covered_days, covered_days_source = _resolve_covered_days(covered_days, claim_info, items, room_indexes)
     # Validate the citation before allowing a policy clause to trigger a policy-based finding.
     verified_rules: list[dict[str, Any]] = []
     for rule in policy_rules:
@@ -136,9 +167,27 @@ def build_audit_report(
         else:
             seen.append((desc, service_date, amount, i))
 
+    # The printed bill total should equal the sum of its lines; a higher printed total is billed but unitemised.
+    stated_total = claim_info.get("stated_total")
+    if stated_total is not None:
+        stated_total = round(float(stated_total), 2)
+        gap = round(stated_total - total_billed, 2)
+        if gap > 1.0:
+            candidates.append({
+                "category": "total_mismatch", "severity": _severity("total_mismatch", gap),
+                "title": "Bill total exceeds the sum of its line items", "description":
+                f"The bill states a total of {stated_total:.2f}, but its line items add up to {total_billed:.2f}. The difference is not itemised; check for missing lines or an addition error.",
+                "item_indices": [], "raw_exposure": gap,
+                "evidence_quote": f"Printed total {stated_total:.2f}; sum of {len(items)} extracted line items {total_billed:.2f}.",
+                "policy_quote": "", "policy_page": None, "bill_pages": [],
+                "calculation": f"{stated_total:.2f} - {total_billed:.2f} = {gap:.2f}",
+                "confidence": "Medium", "review_status": "Needs review", "source": "Deterministic bill-total check",
+                "priority": 0,
+            })
+        elif gap < -1.0:
+            notes.append(f"The printed bill total ({stated_total:.2f}) is lower than the sum of extracted line items ({total_billed:.2f}); a discount or an extraction error may explain it.")
+
     # Room cap is calculated only when a matching rule and a verifiable policy quote exist.
-    room_indexes = [i for i, item in enumerate(items)
-                    if item.get("category") == "room" or any(k in item["description"].lower() for k in ("room charge", "room rent", "room accommodation", "ward charge"))]
     room_rules = [r for r in verified_rules if r.get("rule_type") == "room_daily_limit" and r.get("amount_limit") is not None]
     if room_indexes and room_rules:
         rule = room_rules[0]
@@ -150,7 +199,7 @@ def build_audit_report(
             candidates.append({
                 "category": "room_limit", "severity": _severity("room_limit", excess),
                 "title": "Room charge may exceed policy limit", "description":
-                f"Room-related charges total {room_total:.2f}; the extracted policy states a limit of {cap:.2f} per day. This estimate assumes {covered_days} covered day(s) and no exception.",
+                f"Room-related charges total {room_total:.2f}; the extracted policy states a limit of {cap:.2f} per day. This estimate assumes {covered_days} covered day(s) ({covered_days_source}) and no exception.",
                 "item_indices": room_indexes, "raw_exposure": excess,
                 "evidence_quote": str(rule.get("quote", "")), "policy_quote": str(rule.get("quote", "")),
                 "policy_page": rule.get("page"), "bill_pages": [items[i].get("page") for i in room_indexes],
@@ -184,7 +233,8 @@ def build_audit_report(
     for number, candidate in enumerate(candidates, start=1):
         idxs = [i for i in candidate["item_indices"] if 0 <= i < len(items)]
         raw_exposure = round(float(candidate["raw_exposure"]), 2)
-        available = round(sum(remaining[i] for i in idxs), 2)
+        # Findings tied to no bill line (e.g. an unitemised total) cannot overlap with line-level findings.
+        available = round(sum(remaining[i] for i in idxs), 2) if idxs else raw_exposure
         allocated = min(raw_exposure, available)
         to_allocate = allocated
         for i in idxs:
@@ -197,7 +247,7 @@ def build_audit_report(
         finding = {k: v for k, v in candidate.items() if k not in {"priority", "raw_exposure", "item_indices"}}
         finding.update({
             "id": f"CG-{number:03d}", "potential_exposure": round(allocated, 2),
-            "gross_estimate": raw_exposure, "related_items": item_labels,
+            "gross_estimate": raw_exposure, "related_items": item_labels, "related_indices": idxs,
         })
         if allocated + 0.01 < raw_exposure:
             finding["calculation"] += f"; non-overlap adjustment reduces this finding to {allocated:.2f}"
@@ -210,10 +260,55 @@ def build_audit_report(
         "product": "ClaimGuard AI", "created_at": datetime.now(timezone.utc).isoformat(),
         "source_mode": source_mode, "total_billed": total_billed,
         "finding_count": len(findings), "potential_exposure": total_exposure,
-        "currency": "INR", "covered_days_assumed": covered_days,
+        "currency": "INR", "covered_days_assumed": covered_days, "covered_days_source": covered_days_source,
+        "claim_info": claim_info, "observations": list(observations or []),
         "bill_items": items, "findings": findings, "audit_notes": notes,
         "policy_rules_used": [r for r in verified_rules if r.get("rule_type") != "other"],
         "disclaimer": "Potential exposure is a review estimate, not confirmed overpayment, fraud, or guaranteed recovery. A qualified human reviewer must verify coverage, supporting records, and exceptions.",
+    }
+
+
+def assess_report(report: dict[str, Any]) -> dict[str, Any]:
+    """Turn findings into a risk level and a recommended next step. Never recommends an automatic denial."""
+    findings = report.get("findings", [])
+    observations = report.get("observations", [])
+    billed = float(report.get("total_billed", 0) or 0)
+    exposure = float(report.get("potential_exposure", 0) or 0)
+    share = exposure / billed if billed > 0 else 0.0
+    has_high = any(f.get("severity") == "High" for f in findings)
+    has_high_observation = any(str(o.get("severity", "")).lower() == "high" for o in observations)
+
+    if has_high or share >= 0.15:
+        risk, action = "HIGH", "HOLD FOR MANUAL REVIEW"
+    elif exposure > 0:
+        risk, action = "MEDIUM", "APPROVE WITH ADJUSTMENT"
+    elif has_high_observation:
+        risk, action = "MEDIUM", "REVIEW FLAGGED ITEMS"
+    elif findings:
+        risk, action = "LOW", "REVIEW FLAGGED ITEMS"
+    else:
+        risk, action = "LOW", "APPROVE"
+
+    if findings:
+        largest = max(findings, key=lambda f: f.get("potential_exposure", 0))
+        reasoning = (
+            f"{len(findings)} discrepanc{'y' if len(findings) == 1 else 'ies'} found, with {exposure:,.2f} of potential "
+            f"overpayment ({share:.1%} of the billed amount). The largest is \"{largest.get('title')}\" "
+            f"at {float(largest.get('potential_exposure', 0)):,.2f}. Each finding cites the bill line or policy clause it rests on; "
+            "verify them against the source records before adjusting payment."
+        )
+    else:
+        reasoning = "No configured check found a duplicate, arithmetic error, total mismatch, room-cap breach, or excluded service. This does not guarantee the claim is correct."
+    if observations:
+        reasoning += f" Claude also noted {len(observations)} item(s) outside the rule checks; these are unverified and carry no exposure."
+
+    citations = []
+    for f in findings:
+        if f.get("policy_quote") and f["policy_quote"] not in [c["quote"] for c in citations]:
+            citations.append({"quote": f["policy_quote"], "page": f.get("policy_page")})
+    return {
+        "risk_level": risk, "recommended_action": action, "overpayment_share": round(share, 4),
+        "recommended_payable": round(max(0.0, billed - exposure), 2), "reasoning": reasoning, "citations": citations,
     }
 
 

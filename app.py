@@ -1,194 +1,367 @@
 from __future__ import annotations
+import base64
 import csv
+import html
 import io
 import json
 import os
-from pathlib import Path
+import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
-from audit_engine import build_audit_report, make_sample_report
-from document_reader import extract_document_text, DocumentReadError
-from claude_auditor import analyze_documents, ClaudeAuditError
+from audit_engine import build_audit_report, assess_report
+from document_reader import read_document, DocumentReadError
+from claude_auditor import analyze_documents, model_name, ClaudeAuditError
+from scenarios import SCENARIOS, run_scenario
 
 load_dotenv()
-st.set_page_config(page_title="ClaimGuard AI", page_icon="🛡️", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="ClaimGuard AI", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
 <style>
-:root { --cg-ink: #e9eef8; --cg-muted: #9aa8bd; }
-.block-container { padding-top: 1.7rem; max-width: 1400px; }
-.hero { padding: 1.45rem 1.6rem; border-radius: 18px; background: linear-gradient(125deg, #101c32 0%, #183b55 55%, #116b68 100%); border: 1px solid rgba(255,255,255,.12); margin-bottom: 1.15rem; }
-.hero h1 { margin: 0; color: #f7fbff; letter-spacing: -.035em; font-size: 2.35rem; }
-.hero p { color: #d0dfeb; margin: .35rem 0 0 0; font-size: 1rem; }
-.kicker { color: #65e0ca; font-weight: 700; font-size: .75rem; text-transform: uppercase; letter-spacing: .14em; }
-.small-muted { color: #728099; font-size: .88rem; }
-div[data-testid="stMetric"] { border: 1px solid rgba(128,150,180,.25); padding: 14px 16px; border-radius: 13px; background: rgba(110,130,160,.045); }
-.finding-header { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; }
-.pill { display:inline-block; border-radius:999px; padding:.18rem .55rem; font-size:.75rem; font-weight:700; background:#26374d; color:#d5e3f2; }
-.pill-high { background:#512929; color:#ffb6b6; }
-.pill-medium { background:#574321; color:#ffe0a1; }
-.pill-low { background:#21473f; color:#a8f3d5; }
-div.stButton > button[kind="primary"] { background: #0c887e; border-color:#0c887e; }
+.stApp { background: radial-gradient(1200px 600px at 10% -10%, #10233f 0%, transparent 60%), radial-gradient(900px 500px at 100% 0%, #1e1b4b 0%, transparent 55%), #070d1a; }
+.block-container { padding-top: 1.4rem; max-width: 1500px; }
+header[data-testid="stHeader"] { background: transparent; }
+.cg-header { display:flex; align-items:center; justify-content:space-between; padding: .2rem 0 1rem 0; }
+.cg-brand { display:flex; align-items:center; gap:14px; }
+.cg-title { font-size: 2rem; font-weight: 800; letter-spacing: -.02em; color:#f1f5f9; line-height:1.1; }
+.cg-title span { background: linear-gradient(90deg,#22d3ee,#38bdf8); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.cg-sub { color:#8b9bb4; font-size:.98rem; margin-top:4px; }
+.cg-badge { border-radius:999px; padding:.45rem 1rem; font-weight:700; font-size:.92rem; }
+.cg-badge.rule { background: rgba(161,98,7,.25); color:#fbbf24; border:1px solid rgba(251,191,36,.35); }
+.cg-badge.ai { background: rgba(6,95,70,.3); color:#34d399; border:1px solid rgba(52,211,153,.35); }
+div[data-baseweb="tab-list"] { gap: 1.6rem; border-bottom: 1px solid rgba(148,163,184,.15); }
+button[data-baseweb="tab"] { padding: .7rem .2rem; }
+button[data-baseweb="tab"] p { font-size: 1rem; font-weight: 600; color:#94a3b8; }
+button[data-baseweb="tab"][aria-selected="true"] p { color:#22d3ee; }
+div[data-baseweb="tab-highlight"] { background-color:#22d3ee; }
+.cg-section { font-size:1.25rem; font-weight:700; color:#f1f5f9; margin: .4rem 0 .9rem 0; }
+div[role="radiogroup"] { gap: 12px; width: 100%; }
+div[role="radiogroup"] > div { width:100%; border:1px solid rgba(148,163,184,.16); border-radius:14px; padding:16px 18px; background: rgba(15,23,42,.6); transition: all .15s; }
+div[role="radiogroup"] > div:hover { border-color: rgba(34,211,238,.45); }
+div[role="radiogroup"] > div[data-selected="true"] { border-color:#22d3ee; background: rgba(8,51,68,.45); box-shadow: 0 0 0 1px rgba(34,211,238,.25); }
+div[role="radiogroup"] label[data-testid="stRadioOption"] { width:100%; }
+div[role="radiogroup"] label[data-testid="stRadioOption"] > div > div:first-child { display:none; }
+div[role="radiogroup"] label[data-testid="stRadioOption"] p { font-size: 1.05rem; font-weight: 700; color:#f1f5f9; }
+div[role="radiogroup"] [data-testid="stRadioCaption"] { padding-left: 0; margin-left: 0; }
+div[role="radiogroup"] [data-testid="stRadioCaption"] p { color:#94a3b8; font-size:.92rem; }
+div.stButton > button[kind="primary"] { background: linear-gradient(90deg,#22d3ee,#8b5cf6); border:0; color:white; font-weight:700; font-size:1.05rem; padding:.7rem 0; border-radius:12px; }
+div.stButton > button[kind="primary"]:disabled { opacity:.45; }
+div.stButton > button[kind="primary"] p { font-size:1.08rem; font-weight:700; }
+.cg-card { background: rgba(15,23,42,.72); border:1px solid rgba(148,163,184,.14); border-radius:16px; padding:22px 26px; margin-bottom:18px; }
+.cg-card h3 { margin:0 0 14px 0; font-size:1.3rem; color:#f1f5f9; display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.cg-card.sev-high { background: linear-gradient(135deg, rgba(124,45,18,.55), rgba(41,20,10,.6)); border-color: rgba(251,146,60,.45); }
+.cg-card.sev-medium { background: linear-gradient(135deg, rgba(113,63,18,.45), rgba(30,22,10,.6)); border-color: rgba(251,191,36,.4); }
+.cg-card.sev-clear { background: linear-gradient(135deg, rgba(6,78,59,.45), rgba(8,25,22,.6)); border-color: rgba(52,211,153,.4); }
+.cg-card.ai { background: linear-gradient(135deg, rgba(49,46,129,.45), rgba(15,23,42,.85)); border-color: rgba(129,140,248,.3); }
+.cg-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 14px 40px; }
+.cg-label { color:#8b9bb4; font-size:.92rem; margin-bottom:6px; }
+.cg-value { color:#f1f5f9; font-weight:600; }
+.cg-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.cg-amount { color:#34d399; font-weight:700; }
+.cg-chips { display:flex; flex-wrap:wrap; gap:8px; margin: 4px 0 14px 0; }
+.cg-chip { font-family: ui-monospace, Menlo, monospace; font-size:.82rem; padding:5px 10px; border-radius:8px; background: rgba(148,163,184,.12); color:#cbd5e1; }
+.cg-chip.purple { background: rgba(99,102,241,.22); color:#c7d2fe; }
+.cg-chip.flag { background: rgba(234,88,12,.22); color:#fdba74; }
+.cg-finding { background: rgba(2,6,23,.45); border-radius:10px; padding:14px 16px; margin-top:10px; }
+.cg-frow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px; }
+.cg-tag { font-family: ui-monospace, Menlo, monospace; font-size:.78rem; padding:3px 8px; border-radius:6px; background: rgba(234,88,12,.3); color:#fdba74; font-weight:700; }
+.cg-sev { font-size:.8rem; font-weight:700; color:#94a3b8; }
+.cg-sev.High { color:#f87171; } .cg-sev.Medium { color:#fbbf24; } .cg-sev.Low { color:#34d399; }
+.cg-exp { margin-left:auto; color:#fca5a5; font-weight:700; font-family: ui-monospace, Menlo, monospace; }
+.cg-desc { color:#e2e8f0; }
+.cg-desc b { color:#fff; }
+details { margin-top:8px; } summary { cursor:pointer; color:#7dd3fc; font-size:.88rem; }
+.cg-ev { margin-top:8px; font-size:.9rem; color:#cbd5e1; }
+.cg-ev code { background: rgba(148,163,184,.12); color:#e2e8f0; padding:2px 6px; border-radius:5px; }
+.cg-quote { border-left:3px solid #22d3ee; padding:6px 12px; margin:8px 0; color:#e0f2fe; background: rgba(8,51,68,.35); border-radius:0 8px 8px 0; }
+.cg-risk { font-weight:800; font-size:1rem; }
+.cg-risk.HIGH { color:#f87171; } .cg-risk.MEDIUM { color:#fbbf24; } .cg-risk.LOW, .cg-risk.CLEAR { color:#34d399; }
+.cg-pill { font-size:.88rem; padding:5px 12px; border-radius:999px; background: rgba(148,163,184,.14); color:#e2e8f0; font-weight:600; }
+.cg-action { display:inline-block; font-weight:800; padding:8px 16px; border-radius:8px; letter-spacing:.02em; margin:2px 0 14px 0; }
+.cg-action.LOW { background: rgba(6,95,70,.45); color:#6ee7b7; } .cg-action.MEDIUM { background: rgba(113,63,18,.55); color:#fcd34d; } .cg-action.HIGH { background: rgba(127,29,29,.55); color:#fca5a5; }
+.cg-p { color:#f1f5f9; font-size:1.02rem; line-height:1.55; margin-bottom:14px; }
+.cg-stats { display:grid; grid-template-columns: repeat(4, 1fr); gap:14px; margin-bottom:18px; }
+.cg-stat { background: rgba(15,23,42,.72); border:1px solid rgba(148,163,184,.14); border-radius:14px; padding:14px 18px; }
+.cg-stat .n { font-size:1.45rem; font-weight:800; color:#f1f5f9; margin-top:2px; }
+.cg-stat .n.red { color:#fca5a5; } .cg-stat .n.green { color:#34d399; }
+.cg-empty { text-align:center; padding:70px 20px; color:#8b9bb4; }
+.cg-empty .big { font-size:2.6rem; }
+.cg-headright { display:flex; align-items:center; gap:12px; }
 </style>
 """, unsafe_allow_html=True)
 
-if "audit_result" not in st.session_state:
-    st.session_state.audit_result = None
-if "review_status" not in st.session_state:
-    st.session_state.review_status = {}
+CATEGORY_TAGS = {
+    "arithmetic": "ARITHMETIC_MISMATCH", "duplicate": "DUPLICATE_CHARGE", "room_limit": "ROOM_RENT_CAP",
+    "excluded_service": "EXCLUDED_SERVICE", "total_mismatch": "BILL_TOTAL_MISMATCH",
+}
+REVIEW_STATUSES = ["Needs review", "Confirmed by auditor", "Dismissed by auditor", "Needs more evidence"]
+_SHIELD_SVG = ('<svg xmlns="http://www.w3.org/2000/svg" width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="1.7" '
+               'stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.7-7 9-4-1.3-7-4.5-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>')
+# st.html sanitises inline SVG away, so the logo goes in as an image data URI.
+SHIELD = f'<img alt="" width="46" height="46" src="data:image/svg+xml;base64,{base64.b64encode(_SHIELD_SVG.encode()).decode()}">'
 
-with st.sidebar:
-    st.markdown("## 🛡️ ClaimGuard AI")
-    st.caption("Evidence-based medical bill auditing")
-    st.markdown("---")
-    st.markdown("**How to demo**")
-    st.markdown("1. Click **Load synthetic demo**.\n2. Open each finding to see its evidence.\n3. Download the audit report.\n4. For a live audit, upload two text-based PDFs and add your API key to `.env`.")
-    st.markdown("---")
-    key_present = bool(os.getenv("ANTHROPIC_API_KEY", "").strip())
-    if key_present:
-        st.success("Claude API key detected")
-    else:
-        st.info("Demo mode is ready. No API key needed.")
-    st.caption("MVP limitation: scanned image-only PDFs need OCR first.")
 
-st.markdown("""
-<div class="hero">
-  <div class="kicker">AI audit workspace · MVP</div>
-  <h1>ClaimGuard <span style="color:#65e0ca">AI</span></h1>
-  <p>Find possible billing discrepancies. Trace every policy-based finding to its source. Keep the math transparent.</p>
+def e(value) -> str:
+    """Escape document-derived text before it goes into HTML; '$' would otherwise trigger LaTeX."""
+    text = "—" if value is None or value == "" else str(value)
+    return html.escape(text).replace("$", "&#36;")
+
+
+def inr(amount) -> str:
+    return f"₹{float(amount or 0):,.2f}"
+
+
+if "report" not in st.session_state:
+    st.session_state.report = None
+    st.session_state.live = False
+
+key_present = bool(os.getenv("ANTHROPIC_API_KEY", "").strip())
+report = st.session_state.report
+live = st.session_state.live
+if report is not None and live:
+    badge = f'<span class="cg-badge ai">● Claude AI Mode · {e(model_name())}</span>'
+elif report is not None or not key_present:
+    badge = '<span class="cg-badge rule">● Rule-Based Mode</span>'
+else:
+    badge = '<span class="cg-badge ai">● Claude Ready</span>'
+st.html(f"""<div class="cg-header"><div class="cg-brand">{SHIELD}<div>
+<div class="cg-title"><span>ClaimGuard</span> AI Insurance Auditor</div>
+<div class="cg-sub">Healthcare Claim Audit System • Powered by Claude</div></div></div>
+<div class="cg-headright">{badge}</div></div>""")
+
+tab_claim, tab_items, tab_policy, tab_report = st.tabs(["🧾 Single Claim", "📋 Line Items", "📜 Policy Evidence", "📤 Report & Export"])
+
+
+# ---------- Rendering helpers ----------
+def render_claim_details(r: dict) -> None:
+    info = r.get("claim_info", {})
+    stay = f"{e(info.get('admission_date'))} → {e(info.get('discharge_date'))}" if info.get("admission_date") else e(info.get("bill_date"))
+    categories = sorted({i["category"] for i in r["bill_items"]})
+    item_chips = "".join(f'<span class="cg-chip purple">{e(i["description"])}</span>' for i in r["bill_items"][:12])
+    more = f'<span class="cg-chip">+{len(r["bill_items"]) - 12} more</span>' if len(r["bill_items"]) > 12 else ""
+    st.html(f"""<div class="cg-card"><h3>Claim Details</h3>
+<div class="cg-grid">
+<div><span class="cg-label">Claim ID:</span> <span class="cg-value cg-mono">{e(info.get('invoice_number'))}</span></div>
+<div><span class="cg-label">Provider:</span> <span class="cg-value">{e(info.get('provider'))}</span></div>
+<div><span class="cg-label">Stay:</span> <span class="cg-value">{stay}</span></div>
+<div><span class="cg-label">Billed:</span> <span class="cg-amount">{inr(r['total_billed'])}</span></div>
+<div><span class="cg-label">Covered days:</span> <span class="cg-value">{r['covered_days_assumed']}</span> <span class="cg-label">({e(r.get('covered_days_source'))})</span></div>
+<div><span class="cg-label">Policy:</span> <span class="cg-value">{e(info.get('policy_name'))}</span></div>
 </div>
-""", unsafe_allow_html=True)
+<div class="cg-label" style="margin-top:16px">Service categories:</div>
+<div class="cg-chips">{''.join(f'<span class="cg-chip">{e(c)}</span>' for c in categories)}</div>
+<div class="cg-label">Line items ({len(r['bill_items'])}):</div>
+<div class="cg-chips">{item_chips}{more}</div></div>""")
 
-st.warning("Use synthetic data for demos. Findings are review leads, not determinations of fraud, coverage, or guaranteed recovery.")
 
-with st.expander("How ClaimGuard works", expanded=False):
-    st.markdown("""
-    **1 · Extract:** Read selectable text from the bill and policy PDFs. **2 · Interpret:** Claude returns structured bill items and explicit policy rules. **3 · Verify:** The app checks quoted clauses against source text. **4 · Calculate:** Python calculates duplicate, arithmetic, and supported room-limit exposure. **5 · Review:** A human confirms or dismisses findings.
+def render_rule_engine(r: dict) -> None:
+    findings = r.get("findings", [])
+    if not findings:
+        st.html("""<div class="cg-card sev-clear"><h3><span>✅ Rule Engine Analysis</span><span class="cg-risk CLEAR">CLEAR</span></h3>
+<div class="cg-desc">No duplicates, arithmetic errors, bill-total mismatch, room-cap breaches, or excluded services were detected.</div></div>""")
+        return
+    overall = "High" if any(f["severity"] == "High" for f in findings) else "Medium" if any(f["severity"] == "Medium" for f in findings) else "Low"
+    rows = []
+    for f in findings:
+        evidence = f'<div class="cg-ev"><b>Calculation</b> <code>{e(f.get("calculation"))}</code></div>'
+        if f.get("policy_quote"):
+            evidence += f'<div class="cg-ev"><b>Policy clause</b> (page {e(f.get("policy_page"))})<div class="cg-quote">“{e(f["policy_quote"])}”</div></div>'
+        else:
+            pages = ", ".join(str(p) for p in (f.get("bill_pages") or []) if p is not None)
+            evidence += f'<div class="cg-ev"><b>Bill evidence</b> {e(f.get("evidence_quote"))} <span class="cg-label">· bill page {e(pages or None)}</span></div>'
+        if f.get("related_items"):
+            evidence += f'<div class="cg-ev"><b>Related lines</b> {e(", ".join(f["related_items"]))}</div>'
+        evidence += f'<div class="cg-ev"><b>Method</b> {e(f.get("source"))} · <b>Confidence</b> {e(f.get("confidence"))}</div>'
+        rows.append(f"""<div class="cg-finding"><div class="cg-frow"><span class="cg-tag">{CATEGORY_TAGS.get(f['category'], f['category'].upper())}</span>
+<span class="cg-sev {e(f['severity'])}">{e(f['severity']).upper()}</span><span class="cg-label">{e(f['id'])}</span><span class="cg-exp">{inr(f['potential_exposure'])}</span></div>
+<div class="cg-desc"><b>{e(f['title'])}.</b> {e(f['description'])}</div>
+<details><summary>Evidence &amp; calculation</summary>{evidence}</details></div>""")
+    st.html(f"""<div class="cg-card sev-{overall.lower() if overall != 'Low' else 'medium'}"><h3><span>⚠️ Rule Engine Analysis · {len(findings)} issue{'s' if len(findings) != 1 else ''}</span>
+<span class="cg-risk {overall.upper()}">{overall.upper()}</span></h3>{''.join(rows)}</div>""")
 
-    **Important:** This hackathon MVP does not replace a claims professional, policy administrator, or legal review. It does not automatically deny claims.
-    """)
 
-st.subheader("01 · Add claim documents")
-left, right = st.columns(2, gap="large")
-with left:
-    bill_file = st.file_uploader("Hospital bill", type=["pdf", "txt"], key="bill_file", help="Text-based PDF or TXT; maximum 10 MB.")
-with right:
-    policy_file = st.file_uploader("Insurance policy", type=["pdf", "txt"], key="policy_file", help="Text-based PDF or TXT; maximum 10 MB.")
-covered_days = st.number_input("Covered inpatient days (used for room-cap calculation)", min_value=1, max_value=365, value=1, step=1)
+def render_stats(r: dict, verdict: dict) -> None:
+    st.html(f"""<div class="cg-stats">
+<div class="cg-stat"><div class="cg-label">Total billed</div><div class="n">{inr(r['total_billed'])}</div></div>
+<div class="cg-stat"><div class="cg-label">Issues found</div><div class="n">{r['finding_count']}</div></div>
+<div class="cg-stat"><div class="cg-label">Potential overpayment</div><div class="n red">{inr(r['potential_exposure'])}</div></div>
+<div class="cg-stat"><div class="cg-label">Recommended payable</div><div class="n green">{inr(verdict['recommended_payable'])}</div></div></div>""")
 
-button_col1, button_col2 = st.columns([1.2, 1])
-with button_col1:
-    run_ai = st.button("⚡ Audit uploaded documents", type="primary", use_container_width=True, disabled=not (bill_file and policy_file))
-with button_col2:
-    run_demo = st.button("✨ Load synthetic demo", use_container_width=True)
 
-if run_demo:
-    st.session_state.audit_result = make_sample_report(int(covered_days))
-    st.session_state.review_status = {}
-    st.success("Synthetic audit loaded without calling Claude or using API credits.")
+def render_verdict(r: dict, verdict: dict, is_live: bool) -> None:
+    risk = verdict["risk_level"]
+    title = "🧠 Claude AI Analysis" if is_live else "🧠 Audit Verdict"
+    body = f"""<div class="cg-label">Recommended Action</div><div class="cg-action {risk}">{e(verdict['recommended_action'])}</div>
+<div class="cg-label">Audit Reasoning</div><div class="cg-p">{e(verdict['reasoning'])}</div>"""
+    if is_live and r.get("reviewer_summary"):
+        body += f'<div class="cg-label">Claude\'s Read of the Documents</div><div class="cg-p">{e(r["reviewer_summary"])}</div>'
+    if verdict["citations"]:
+        quotes = "".join(f'<div class="cg-quote">“{e(c["quote"])}” <span class="cg-label">— policy page {e(c["page"])}</span></div>' for c in verdict["citations"])
+        body += f'<div class="cg-label">Supporting Policy Clauses</div>{quotes}'
+    observations = r.get("observations", [])
+    if observations:
+        items = "".join(
+            f"""<div class="cg-finding"><div class="cg-frow"><span class="cg-tag" style="background:rgba(99,102,241,.3);color:#c7d2fe">AI_OBSERVATION</span>
+<span class="cg-sev {e(str(o.get('severity', 'low')).title())}">{e(str(o.get('severity', 'low')).upper())}</span></div>
+<div class="cg-desc"><b>{e(o.get('title'))}.</b> {e(o.get('detail'))}</div></div>""" for o in observations)
+        body += f'<div class="cg-label" style="margin-top:14px">AI-Flagged Observations (unverified, not priced)</div>{items}'
+    if not is_live:
+        body += '<div class="cg-label" style="margin-top:12px">Rule-based verdict. Upload documents to add Claude\'s extraction, summary, and observations.</div>'
+    st.html(f"""<div class="cg-card ai"><h3><span>{title}</span><span style="display:flex;gap:12px;align-items:center">
+<span class="cg-risk {risk}">{risk}</span><span class="cg-pill">{verdict['overpayment_share']:.0%} of bill flagged</span></span></h3>{body}</div>""")
 
-if run_ai:
-    try:
-        with st.spinner("Reading documents and running evidence-backed audit…"):
-            bill_text = extract_document_text(bill_file.name, bill_file.getvalue())
-            policy_text = extract_document_text(policy_file.name, policy_file.getvalue())
-            parsed = analyze_documents(bill_text, policy_text)
-            report = build_audit_report(
+
+def run_live_audit(bill_file, policy_file, covered_days: int) -> None:
+    with st.status("Auditing claim…", expanded=True) as status:
+        try:
+            st.write("📄 Reading documents…")
+            bill = read_document(bill_file.name, bill_file.getvalue())
+            policy = read_document(policy_file.name, policy_file.getvalue(), allow_images=False)
+            source = f"{len(bill.images)} page image(s)" if bill.is_visual else "bill text"
+            st.write(f"🧠 Claude ({model_name()}) is extracting line items and policy clauses from the {source}…")
+            parsed = analyze_documents(bill, policy)
+            st.write("⚙️ Running the rule engine…")
+            notes = list(parsed.notes)
+            if bill.is_visual:
+                notes.append("The bill was read from page images with Claude vision. Check extracted amounts against the original.")
+            for doc in (bill, policy):
+                if doc.truncated:
+                    notes.append(f"{doc.filename} was longer than the text limit and was truncated; later pages were not audited.")
+            claim_info = parsed.claim_info.model_dump()
+            claim_info["policy_name"] = policy_file.name
+            result = build_audit_report(
                 bill_items=[item.model_dump() for item in parsed.bill_items],
                 policy_rules=[rule.model_dump() for rule in parsed.policy_rules],
-                covered_days=int(covered_days), policy_text=policy_text,
-                notes=parsed.notes, source_mode=f"Claude API · {os.getenv('CLAUDE_MODEL', 'claude-sonnet-4-6')}",
+                covered_days=covered_days or None, policy_text=policy.text, notes=notes,
+                source_mode=f"Claude API · {model_name()}", claim_info=claim_info,
+                observations=[o.model_dump() for o in parsed.observations],
             )
-            st.session_state.audit_result = report
-            st.session_state.review_status = {}
-        st.success("Audit completed. Review the evidence for each finding before taking action.")
-    except (DocumentReadError, ClaudeAuditError) as exc:
-        st.error(str(exc))
-    except Exception as exc:
-        st.error(f"Unexpected error: {exc}")
+            result["reviewer_summary"] = parsed.reviewer_summary
+            st.session_state.report, st.session_state.live = result, True
+            status.update(label=f"Audit complete: {result['finding_count']} issue(s) found", state="complete", expanded=False)
+        except (DocumentReadError, ClaudeAuditError) as exc:
+            status.update(label="Audit failed", state="error")
+            st.error(str(exc))
+            return
+    st.rerun()
 
-report = st.session_state.audit_result
-if report:
-    st.markdown("---")
-    st.subheader("02 · Audit results")
-    st.caption(f"Mode: {report['source_mode']} · Generated: {report['created_at'][:19].replace('T', ' ')} UTC · Currency assumption: INR")
-    findings = report.get("findings", [])
-    high_count = sum(1 for f in findings if f.get("severity") == "High")
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Total billed", f"₹{report['total_billed']:,.2f}")
-    m2.metric("Findings", str(report['finding_count']))
-    m3.metric("High priority", str(high_count))
-    m4.metric("Potential exposure", f"₹{report['potential_exposure']:,.2f}")
 
-    if report.get("source_mode", "").startswith("Synthetic"):
-        st.info("This is a fictional demo. Its expected result is ₹7,000 potential exposure: ₹5,000 room-cap estimate + ₹2,000 suspected duplicate.")
+# ---------- Single claim ----------
+with tab_claim:
+    left, right = st.columns([1, 2.05], gap="large")
+    with left:
+        st.html('<div class="cg-section">⚡ Select Scenario</div>')
+        options = list(SCENARIOS) + ["upload"]
+        captions = [SCENARIOS[k]["subtitle"] for k in SCENARIOS] + ["Audit your own hospital bill (PDF, TXT, or photo) against your policy with Claude"]
+        choice = st.radio("Scenario", options, format_func=lambda k: "📄 Upload Your Documents" if k == "upload" else SCENARIOS[k]["title"],
+                          captions=captions, label_visibility="collapsed", key="scenario")
+        disabled = False
+        if choice == "upload":
+            bill_file = st.file_uploader("Hospital bill", type=["pdf", "txt", "png", "jpg", "jpeg"], help="Text PDF, scanned PDF, TXT, or a photo of the bill. Max 10 MB.")
+            policy_file = st.file_uploader("Insurance policy", type=["pdf", "txt"], help="Text-based PDF or TXT, so quoted clauses can be verified. Max 10 MB.")
+            covered_days = st.number_input("Covered inpatient days", min_value=0, max_value=365, value=0, step=1,
+                                           help="Leave at 0 to detect the stay from the admission and discharge dates on the bill.")
+            if not key_present:
+                st.warning("Add ANTHROPIC_API_KEY to .env to audit uploaded documents.")
+            disabled = not (bill_file and policy_file and key_present)
+        if st.button("▷  Analyze Claim", type="primary", width="stretch", disabled=disabled):
+            if choice == "upload":
+                run_live_audit(bill_file, policy_file, int(covered_days))
+            else:
+                st.session_state.report, st.session_state.live = run_scenario(choice), False
+                st.rerun()
 
-    tab_findings, tab_items, tab_notes = st.tabs(["Findings & evidence", "Extracted bill items", "Audit notes"])
-    with tab_findings:
-        if not findings:
-            st.success("No evidence-backed discrepancies were identified by the configured checks. This does not guarantee the claim is correct.")
-        for finding in findings:
-            severity = finding.get("severity", "Low")
-            severity_class = "pill-high" if severity == "High" else "pill-medium" if severity == "Medium" else "pill-low"
-            exposure = float(finding.get("potential_exposure", 0) or 0)
-            with st.container(border=True):
-                st.markdown(f"<div class='finding-header'><span class='pill {severity_class}'>{severity.upper()} PRIORITY</span><span class='pill'>{finding.get('category', 'finding').replace('_', ' ').upper()}</span><span class='pill'>{finding.get('id', '')}</span></div>", unsafe_allow_html=True)
-                st.markdown(f"### {finding.get('title', 'Audit finding')}")
-                st.write(finding.get("description", ""))
-                cols = st.columns([1, 1, 1.6])
-                cols[0].metric("Exposure for review", f"₹{exposure:,.2f}")
-                cols[1].metric("Evidence confidence", finding.get("confidence", "Unspecified"))
-                cols[2].write("**Review status**")
-                status_key = f"status_{finding.get('id', 'x')}"
-                current_status = st.session_state.review_status.get(finding.get("id", ""), finding.get("review_status", "Needs review"))
-                selected = cols[2].selectbox("Review status", ["Needs review", "Confirmed by auditor", "Dismissed by auditor", "Needs more evidence"], index=["Needs review", "Confirmed by auditor", "Dismissed by auditor", "Needs more evidence"].index(current_status) if current_status in ["Needs review", "Confirmed by auditor", "Dismissed by auditor", "Needs more evidence"] else 0, key=status_key, label_visibility="collapsed")
-                st.session_state.review_status[finding.get("id", "")] = selected
-                st.markdown(f"**Calculation**  \n`{finding.get('calculation', 'No financial calculation')}`")
-                if finding.get("policy_quote"):
-                    st.markdown("**Supporting policy clause**")
-                    st.info(f"“{finding['policy_quote']}”")
-                    st.caption(f"Policy page: {finding.get('policy_page') or 'Not available'} · Clause evidence is checked against the extracted policy text.")
-                else:
-                    st.markdown(f"**Bill evidence**  \n{finding.get('evidence_quote', 'No exact quote available')}")
-                    pages = [p for p in (finding.get("bill_pages") or []) if p is not None]
-                    st.caption("Bill page(s): " + (", ".join(str(p) for p in pages) if pages else "Not available"))
-                if finding.get("related_items"):
-                    st.caption("Related bill item(s): " + ", ".join(finding["related_items"]))
-                if finding.get("source"):
-                    st.caption("Detection method: " + finding["source"])
-
-    with tab_items:
-        if report.get("bill_items"):
-            st.dataframe(report["bill_items"], use_container_width=True, hide_index=True)
+    with right:
+        if report is None:
+            st.html("""<div class="cg-card cg-empty"><div class="big">🛡️</div><div class="cg-value" style="font-size:1.15rem;margin:8px 0">No claim analysed yet</div>
+<div>Pick a demo scenario or upload a hospital bill and policy, then click <b>Analyze Claim</b>.<br>
+ClaimGuard flags duplicates, arithmetic errors, padded totals, room-rent cap breaches, and excluded services, and cites the policy clause behind each one.</div></div>""")
         else:
-            st.write("No bill items extracted.")
-        st.caption("Line items are AI-extracted for live audits. Verify them against the original document before relying on the report.")
+            verdict = assess_report(report)
+            render_claim_details(report)
+            render_rule_engine(report)
+            render_stats(report, verdict)
+            render_verdict(report, verdict, live)
+            st.caption(f"{report['source_mode']} · Generated {report['created_at'][:19].replace('T', ' ')} UTC · Findings are review leads, not determinations of fraud or coverage.")
 
-    with tab_notes:
+
+# ---------- Line items ----------
+with tab_items:
+    if report is None:
+        st.info("Run an analysis to see the extracted bill line items.")
+    else:
+        flags: dict[int, list[str]] = {}
+        for f in report["findings"]:
+            for i in f.get("related_indices", []):
+                flags.setdefault(i, []).append(f"{f['id']} {CATEGORY_TAGS.get(f['category'], f['category'])}")
+        df = pd.DataFrame([{
+            "#": n + 1, "Description": it["description"], "Date": it.get("service_date"), "Qty": it["quantity"],
+            "Unit price (₹)": it["unit_price"], "Total (₹)": it["total"], "Category": it["category"],
+            "Page": it.get("page"), "Flags": ", ".join(flags.get(n, [])),
+        } for n, it in enumerate(report["bill_items"])])
+        styled = df.style.apply(lambda row: ["background-color: rgba(234,88,12,.18)" if row["Flags"] else "" for _ in row], axis=1) \
+            .format({"Unit price (₹)": "{:,.2f}", "Total (₹)": "{:,.2f}", "Qty": "{:g}"})
+        st.dataframe(styled, width="stretch", hide_index=True)
+        st.caption(f"{len(df)} line items · {len(flags)} flagged (highlighted). Live audits use AI-extracted lines; verify them against the original bill.")
+
+
+# ---------- Policy evidence ----------
+with tab_policy:
+    if report is None:
+        st.info("Run an analysis to see the policy clauses used.")
+    else:
+        rules = report.get("policy_rules_used", [])
+        if rules:
+            st.markdown("**Verified policy clauses applied by the rule engine**")
+            for rule in rules:
+                limit = f" · limit {inr(rule['amount_limit'])}/day" if rule.get("amount_limit") else ""
+                st.html(f"""<div class="cg-card" style="padding:16px 20px"><div class="cg-frow"><span class="cg-tag" style="background:rgba(34,211,238,.18);color:#67e8f9">{e(str(rule.get('rule_type')).upper())}</span>
+<span class="cg-label">page {e(rule.get('page'))}{e(limit)} · confidence {e(rule.get('confidence'))}</span></div>
+<div class="cg-desc">{e(rule.get('description'))}</div><div class="cg-quote">“{e(rule.get('quote'))}”</div></div>""")
+        else:
+            st.warning("No verifiable room-cap or exclusion clauses were found in the policy, so only bill-internal checks ran.")
+        st.markdown("**Audit notes**")
         for note in report.get("audit_notes", []):
             st.markdown(f"- {note}")
-        st.markdown("**Financial interpretation**")
-        st.write(report.get("disclaimer", "Potential exposure requires human review."))
 
-    # Download reports include the latest manual review statuses.
-    export_report = dict(report)
-    export_findings = []
-    for f in findings:
-        f_out = dict(f)
-        f_out["review_status"] = st.session_state.review_status.get(f.get("id", ""), f.get("review_status", "Needs review"))
-        export_findings.append(f_out)
-    export_report["findings"] = export_findings
-    json_bytes = json.dumps(export_report, indent=2, ensure_ascii=False).encode("utf-8")
-    csv_output = io.StringIO()
-    csv_fields = ["id", "severity", "category", "title", "description", "potential_exposure", "confidence", "review_status", "calculation", "policy_quote", "policy_page", "evidence_quote"]
-    writer = csv.DictWriter(csv_output, fieldnames=csv_fields, extrasaction="ignore")
-    writer.writeheader()
-    writer.writerows(export_findings)
-    st.markdown("---")
-    st.subheader("03 · Export report")
-    d1, d2 = st.columns(2)
-    d1.download_button("⬇️ Download full JSON report", data=json_bytes, file_name="claimguard_audit_report.json", mime="application/json", use_container_width=True)
-    d2.download_button("⬇️ Download findings CSV", data=csv_output.getvalue().encode("utf-8"), file_name="claimguard_findings.csv", mime="text/csv", use_container_width=True)
 
-st.markdown("---")
-st.caption("ClaimGuard AI · Hackathon MVP · Synthetic demo data only · Human review required before any consequential insurance decision.")
+# ---------- Report & export ----------
+with tab_report:
+    if report is None:
+        st.info("Run an analysis to review findings and export the report.")
+    else:
+        findings = report["findings"]
+        statuses: dict[str, str] = {}
+        if findings:
+            st.markdown("**Reviewer decisions**: set a status for each finding before exporting.")
+            table = pd.DataFrame([{
+                "ID": f["id"], "Severity": f["severity"], "Type": CATEGORY_TAGS.get(f["category"], f["category"]),
+                "Finding": f["title"], "Exposure (₹)": f["potential_exposure"], "Status": f.get("review_status", "Needs review"),
+            } for f in findings])
+            # Keyed per report so edits persist across reruns and reset when a new claim is analysed.
+            edited = st.data_editor(table, key=f"review_{report['created_at']}", hide_index=True, width="stretch",
+                                    disabled=["ID", "Severity", "Type", "Finding", "Exposure (₹)"],
+                                    column_config={"Status": st.column_config.SelectboxColumn(options=REVIEW_STATUSES, required=True),
+                                                   "Exposure (₹)": st.column_config.NumberColumn(format="%.2f")})
+            statuses = dict(zip(edited["ID"], edited["Status"]))
+        else:
+            st.success("No findings to review.")
+
+        export_findings = []
+        for f in findings:
+            f_out = {k: v for k, v in f.items() if k != "related_indices"}
+            f_out["review_status"] = statuses.get(f["id"], f.get("review_status", "Needs review"))
+            export_findings.append(f_out)
+        export_report = dict(report, findings=export_findings, verdict=assess_report(report))
+        csv_output = io.StringIO()
+        writer = csv.DictWriter(csv_output, extrasaction="ignore", fieldnames=[
+            "id", "severity", "category", "title", "description", "potential_exposure", "confidence", "review_status",
+            "calculation", "policy_quote", "policy_page", "evidence_quote"])
+        writer.writeheader()
+        writer.writerows(export_findings)
+        d1, d2 = st.columns(2)
+        d1.download_button("⬇️ Download full JSON report", data=json.dumps(export_report, indent=2, ensure_ascii=False).encode("utf-8"),
+                           file_name="claimguard_audit_report.json", mime="application/json", width="stretch")
+        d2.download_button("⬇️ Download findings CSV", data=csv_output.getvalue().encode("utf-8"),
+                           file_name="claimguard_findings.csv", mime="text/csv", width="stretch")
+        st.caption(report.get("disclaimer", ""))

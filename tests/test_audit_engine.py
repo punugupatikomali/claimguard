@@ -43,3 +43,38 @@ def test_overlapping_findings_are_not_double_counted():
     # Arithmetic exposure is 50, and the excluded-service finding may use only the remaining 200.
     assert report["potential_exposure"] <= 250
     assert report["potential_exposure"] == 250
+
+
+def test_stated_total_above_line_sum_is_flagged_once():
+    items = [{"description": "Lab test", "quantity": 1, "unit_price": 500, "total": 500, "category": "lab", "page": 1}]
+    report = build_audit_report(items, [], policy_text="", notes=[], claim_info={"stated_total": 800})
+    assert report["potential_exposure"] == 300
+    assert [f["category"] for f in report["findings"]] == ["total_mismatch"]
+
+
+def test_covered_days_derived_from_admission_and_discharge():
+    items = [{"description": "Room Charges", "quantity": 3, "unit_price": 8000, "total": 24000, "category": "room", "page": 1}]
+    quote = "Room rent is covered up to INR 5,000 per day."
+    rules = [{"rule_type": "room_daily_limit", "description": "cap", "amount_limit": 5000, "target_keywords": ["room"],
+              "page": 1, "quote": quote, "confidence": "high"}]
+    report = build_audit_report(items, rules, covered_days=None, policy_text=f"[PAGE 1]\n{quote}", notes=[],
+                                claim_info={"admission_date": "2026-08-03", "discharge_date": "2026-08-06"})
+    assert report["covered_days_assumed"] == 3
+    assert report["potential_exposure"] == 9000
+
+
+def test_scenarios_produce_expected_findings_and_verdicts():
+    from scenarios import run_scenario
+    from audit_engine import assess_report
+    expected = {
+        "room_cap": ({"room_limit"}, 10500, "HOLD FOR MANUAL REVIEW"),
+        "duplicate": ({"duplicate"}, 7700, "HOLD FOR MANUAL REVIEW"),
+        "excluded": ({"excluded_service"}, 4650, "APPROVE WITH ADJUSTMENT"),
+        "inflated": ({"arithmetic", "total_mismatch"}, 4900, "HOLD FOR MANUAL REVIEW"),
+        "clean": (set(), 0, "APPROVE"),
+    }
+    for key, (categories, exposure, action) in expected.items():
+        report = run_scenario(key)
+        assert {f["category"] for f in report["findings"]} == categories, key
+        assert report["potential_exposure"] == exposure, key
+        assert assess_report(report)["recommended_action"] == action, key
