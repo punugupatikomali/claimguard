@@ -96,7 +96,8 @@ def analyze_documents(bill: DocumentContent, policy: DocumentContent) -> Extract
     # Import only when needed so the demo scenarios remain usable without the SDK installed.
     try:
         import anthropic
-        client = anthropic.Anthropic(api_key=api_key, timeout=240.0, max_retries=1)
+        base_url = os.getenv("ANTHROPIC_BASE_URL", "").strip() or None
+        client = anthropic.Anthropic(api_key=api_key, base_url=base_url, timeout=240.0, max_retries=1)
     except Exception as exc:
         raise ClaudeAuditError(f"Could not initialize the Anthropic SDK: {exc}") from exc
 
