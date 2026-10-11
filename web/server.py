@@ -1,5 +1,6 @@
 """Web API + single-page dashboard for hosts that can't run Streamlit (e.g. Vercel)."""
 from __future__ import annotations
+import logging
 import os
 import sys
 from pathlib import Path
@@ -17,6 +18,7 @@ from pipeline import audit_documents
 from scenarios import SCENARIOS, run_scenario
 
 load_dotenv(ROOT / ".env")
+logger = logging.getLogger("claimguard")
 INDEX = Path(__file__).resolve().parent / "static" / "index.html"
 
 app = FastAPI(title="ClaimGuard AI", docs_url=None, redoc_url=None)
@@ -59,4 +61,7 @@ def audit(bill: UploadFile = File(...), policy: UploadFile = File(...), covered_
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ClaudeAuditError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:  # surface the real cause instead of a bare 500
+        logger.exception("Audit failed")
+        raise HTTPException(status_code=500, detail=f"Unexpected error ({type(exc).__name__}): {str(exc)[:300]}") from exc
     return _with_verdict(report)
