@@ -23,7 +23,13 @@ cd claimguard
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-streamlit run app.py
+streamlit run streamlit_app.py
+```
+
+The same dashboard also ships as a FastAPI web app (used for Vercel):
+
+```bash
+uvicorn web.server:app --port 8000   # then open http://localhost:8000
 ```
 
 Pick a demo scenario and click **Analyze Claim** to see an audit without using API credits.
@@ -32,10 +38,17 @@ Pick a demo scenario and click **Analyze Claim** to see an audit without using A
 
 1. Copy `.env.example` to `.env`.
 2. Add your Anthropic API key to `ANTHROPIC_API_KEY` in `.env`.
-3. Restart `streamlit run app.py` if the app was already running.
-4. Choose **Upload Your Documents**, add a hospital bill (PDF, TXT, PNG, or JPG) and a text-based policy (PDF or TXT), and click **Analyze Claim**. Leave covered days at 0 to detect the stay from the bill.
+3. Set `ANTHROPIC_BASE_URL` too if your key comes from an API gateway rather than Anthropic.
+4. Restart the app if it was already running.
+5. Choose **Upload Your Documents**, add a hospital bill (PDF, TXT, PNG, or JPG) and a text-based policy (PDF or TXT), and click **Analyze Claim**. Leave covered days at 0 to detect the stay from the bill.
 
 The default model is `claude-sonnet-5-5`; set `CLAUDE_MODEL` in `.env` if your account uses a different available model. Each live audit is designed to make one Claude API request. Use the sample demo while iterating on the UI to conserve credits.
+
+## Deploy on Vercel
+
+1. Import the GitHub repo at vercel.com/new and leave the build settings at their defaults. `pyproject.toml` points Vercel at `web.server:app`.
+2. Add environment variables `ANTHROPIC_API_KEY`, `CLAUDE_MODEL`, and (for gateway keys) `ANTHROPIC_BASE_URL`.
+3. Deploy. Vercel limits uploads to 4.5 MB per request, so keep the bill and policy under 4 MB combined.
 
 ## Tests
 
@@ -55,13 +68,16 @@ pytest -q
 
 ```text
 claimguard/
-├── app.py
+├── streamlit_app.py      # Streamlit dashboard (local / Streamlit Cloud)
+├── web/                  # FastAPI + HTML dashboard (Vercel)
+├── pipeline.py
 ├── audit_engine.py
 ├── claude_auditor.py
 ├── document_reader.py
 ├── scenarios.py
 ├── schemas.py
 ├── requirements.txt
+├── pyproject.toml        # Vercel entrypoint and web dependencies
 ├── .streamlit/config.toml
 ├── .env.example
 ├── .gitignore

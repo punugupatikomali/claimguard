@@ -1,0 +1,17 @@
+[project]
+name = "claimguard"
+version = "0.1.0"
+description = "AI insurance claim auditor"
+requires-python = ">=3.12"
+# Only what the web API needs at runtime; the Streamlit app's extras live in requirements.txt.
+dependencies = [
+    "fastapi>=0.115,<1",
+    "python-multipart>=0.0.9",
+    "anthropic>=0.50,<1",
+    "pymupdf>=1.24,<2",
+    "pydantic>=2.7,<3",
+    "python-dotenv>=1.0,<2",
+]
+
+[tool.vercel]
+entrypoint = "web.server:app"

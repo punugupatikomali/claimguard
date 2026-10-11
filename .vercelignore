@@ -1,0 +1,6 @@
+.venv
+tests
+sample_data
+.streamlit
+__pycache__
+.pytest_cache

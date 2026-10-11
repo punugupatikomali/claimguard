@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClaimGuard AI · Insurance Auditor</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2322d3ee' stroke-width='2'><path d='M12 3l7 3v6c0 4.5-3 7.7-7 9-4-1.3-7-4.5-7-9V6l7-3z'/></svg>">
+<style>
+* { box-sizing: border-box; }
+body { margin:0; font-family: "Inter", "Source Sans Pro", system-ui, -apple-system, Segoe UI, sans-serif; color:#e5edf7; min-height:100vh;
+  background: radial-gradient(1200px 600px at 10% -10%, #10233f 0%, transparent 60%), radial-gradient(900px 500px at 100% 0%, #1e1b4b 0%, transparent 55%), #070d1a; background-attachment: fixed; }
+.wrap { max-width:1500px; margin:0 auto; padding: 28px 40px 60px; }
+.cg-header { display:flex; align-items:center; justify-content:space-between; padding-bottom:18px; }
+.cg-brand { display:flex; align-items:center; gap:14px; }
+.cg-title { font-size:2rem; font-weight:800; letter-spacing:-.02em; color:#f1f5f9; line-height:1.1; }
+.cg-title span { background: linear-gradient(90deg,#22d3ee,#38bdf8); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.cg-sub { color:#8b9bb4; font-size:.98rem; margin-top:4px; }
+.cg-badge { border-radius:999px; padding:.45rem 1rem; font-weight:700; font-size:.92rem; }
+.cg-badge.rule { background: rgba(161,98,7,.25); color:#fbbf24; border:1px solid rgba(251,191,36,.35); }
+.cg-badge.ai { background: rgba(6,95,70,.3); color:#34d399; border:1px solid rgba(52,211,153,.35); }
+.tabs { display:flex; gap:28px; border-bottom:1px solid rgba(148,163,184,.15); margin-bottom:22px; }
+.tab { background:none; border:0; color:#94a3b8; font-family:inherit; font-size:1rem; font-weight:600; padding:12px 2px; cursor:pointer; border-bottom:2px solid transparent; }
+.tab.active { color:#22d3ee; border-bottom-color:#22d3ee; }
+.panel { display:none; } .panel.active { display:block; }
+.layout { display:grid; grid-template-columns: minmax(300px, 1fr) 2.05fr; gap:32px; align-items:start; }
+.cg-section { font-size:1.25rem; font-weight:700; color:#f1f5f9; margin: 4px 0 14px; }
+.scenario { width:100%; text-align:left; border:1px solid rgba(148,163,184,.16); border-radius:14px; padding:16px 18px; background: rgba(15,23,42,.6); margin-bottom:12px; cursor:pointer; color:inherit; font-family:inherit; transition: all .15s; }
+.scenario:hover { border-color: rgba(34,211,238,.45); }
+.scenario.selected { border-color:#22d3ee; background: rgba(8,51,68,.45); box-shadow: 0 0 0 1px rgba(34,211,238,.25); }
+.scenario b { display:block; font-size:1.05rem; color:#f1f5f9; margin-bottom:4px; }
+.scenario small { color:#94a3b8; font-size:.92rem; line-height:1.4; }
+.upload { border:1px solid rgba(148,163,184,.16); border-radius:14px; padding:16px 18px; background: rgba(15,23,42,.6); margin-bottom:12px; display:none; }
+.upload.show { display:block; }
+.upload label { display:block; color:#8b9bb4; font-size:.9rem; margin: 10px 0 6px; }
+.upload input[type=file], .upload input[type=number] { width:100%; color:#cbd5e1; background: rgba(2,6,23,.5); border:1px solid rgba(148,163,184,.2); border-radius:8px; padding:8px; font-family:inherit; }
+.hint { color:#8b9bb4; font-size:.85rem; margin-top:8px; }
+.warn { color:#fbbf24; font-size:.9rem; margin-top:10px; }
+.analyze { width:100%; background: linear-gradient(90deg,#22d3ee,#8b5cf6); border:0; color:white; font-family:inherit; font-size:1.08rem; font-weight:700; padding:14px 0; border-radius:12px; cursor:pointer; }
+.analyze:disabled { opacity:.45; cursor:not-allowed; }
+.progress { color:#7dd3fc; font-size:.92rem; margin-top:12px; min-height:1.2em; }
+.error { background: rgba(127,29,29,.35); border:1px solid rgba(248,113,113,.4); color:#fecaca; border-radius:10px; padding:12px 14px; margin-top:12px; display:none; }
+.cg-card { background: rgba(15,23,42,.72); border:1px solid rgba(148,163,184,.14); border-radius:16px; padding:22px 26px; margin-bottom:18px; }
+.cg-card h3 { margin:0 0 14px; font-size:1.3rem; color:#f1f5f9; display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.cg-card.sev-high { background: linear-gradient(135deg, rgba(124,45,18,.55), rgba(41,20,10,.6)); border-color: rgba(251,146,60,.45); }
+.cg-card.sev-medium { background: linear-gradient(135deg, rgba(113,63,18,.45), rgba(30,22,10,.6)); border-color: rgba(251,191,36,.4); }
+.cg-card.sev-clear { background: linear-gradient(135deg, rgba(6,78,59,.45), rgba(8,25,22,.6)); border-color: rgba(52,211,153,.4); }
+.cg-card.ai { background: linear-gradient(135deg, rgba(49,46,129,.45), rgba(15,23,42,.85)); border-color: rgba(129,140,248,.3); }
+.cg-grid { display:grid; grid-template-columns: 1fr 1fr; gap:14px 40px; }
+.cg-label { color:#8b9bb4; font-size:.92rem; margin-bottom:6px; }
+.cg-value { color:#f1f5f9; font-weight:600; }
+.cg-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.cg-amount { color:#34d399; font-weight:700; }
+.cg-chips { display:flex; flex-wrap:wrap; gap:8px; margin: 4px 0 14px; }
+.cg-chip { font-family: ui-monospace, Menlo, monospace; font-size:.82rem; padding:5px 10px; border-radius:8px; background: rgba(148,163,184,.12); color:#cbd5e1; }
+.cg-chip.purple { background: rgba(99,102,241,.22); color:#c7d2fe; }
+.cg-finding { background: rgba(2,6,23,.45); border-radius:10px; padding:14px 16px; margin-top:10px; }
+.cg-frow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px; }
+.cg-tag { font-family: ui-monospace, Menlo, monospace; font-size:.78rem; padding:3px 8px; border-radius:6px; background: rgba(234,88,12,.3); color:#fdba74; font-weight:700; }
+.cg-tag.ai { background: rgba(99,102,241,.3); color:#c7d2fe; } .cg-tag.rule { background: rgba(34,211,238,.18); color:#67e8f9; }
+.cg-sev { font-size:.8rem; font-weight:700; color:#94a3b8; }
+.cg-sev.High { color:#f87171; } .cg-sev.Medium { color:#fbbf24; } .cg-sev.Low { color:#34d399; }
+.cg-exp { margin-left:auto; color:#fca5a5; font-weight:700; font-family: ui-monospace, Menlo, monospace; }
+.cg-desc { color:#e2e8f0; line-height:1.5; } .cg-desc b { color:#fff; }
+details { margin-top:8px; } summary { cursor:pointer; color:#7dd3fc; font-size:.88rem; }
+.cg-ev { margin-top:8px; font-size:.9rem; color:#cbd5e1; }
+.cg-ev code { background: rgba(148,163,184,.12); color:#e2e8f0; padding:2px 6px; border-radius:5px; }
+.cg-quote { border-left:3px solid #22d3ee; padding:6px 12px; margin:8px 0; color:#e0f2fe; background: rgba(8,51,68,.35); border-radius:0 8px 8px 0; }
+.cg-risk { font-weight:800; font-size:1rem; }
+.cg-risk.HIGH { color:#f87171; } .cg-risk.MEDIUM { color:#fbbf24; } .cg-risk.LOW, .cg-risk.CLEAR { color:#34d399; }
+.cg-pill { font-size:.88rem; padding:5px 12px; border-radius:999px; background: rgba(148,163,184,.14); color:#e2e8f0; font-weight:600; }
+.cg-action { display:inline-block; font-weight:800; padding:8px 16px; border-radius:8px; letter-spacing:.02em; margin:2px 0 14px; }
+.cg-action.LOW { background: rgba(6,95,70,.45); color:#6ee7b7; } .cg-action.MEDIUM { background: rgba(113,63,18,.55); color:#fcd34d; } .cg-action.HIGH { background: rgba(127,29,29,.55); color:#fca5a5; }
+.cg-p { color:#f1f5f9; font-size:1.02rem; line-height:1.55; margin-bottom:14px; }
+.cg-stats { display:grid; grid-template-columns: repeat(4, 1fr); gap:14px; margin-bottom:18px; }
+.cg-stat { background: rgba(15,23,42,.72); border:1px solid rgba(148,163,184,.14); border-radius:14px; padding:14px 18px; }
+.cg-stat .n { font-size:1.45rem; font-weight:800; color:#f1f5f9; margin-top:2px; }
+.cg-stat .n.red { color:#fca5a5; } .cg-stat .n.green { color:#34d399; }
+.cg-empty { text-align:center; padding:70px 20px; color:#8b9bb4; line-height:1.6; }
+.cg-empty .big { font-size:2.6rem; }
+.caption { color:#8b9bb4; font-size:.85rem; }
+table { width:100%; border-collapse:collapse; font-size:.92rem; }
+th, td { text-align:left; padding:10px 12px; border-bottom:1px solid rgba(148,163,184,.12); }
+th { color:#8b9bb4; font-weight:600; }
+td.num { text-align:right; font-family: ui-monospace, Menlo, monospace; }
+tr.flagged td { background: rgba(234,88,12,.14); }
+select { background: rgba(2,6,23,.6); color:#e2e8f0; border:1px solid rgba(148,163,184,.25); border-radius:6px; padding:5px 8px; font-family:inherit; }
+.btn { background: rgba(15,23,42,.8); border:1px solid rgba(148,163,184,.25); color:#e2e8f0; border-radius:10px; padding:12px 16px; font-family:inherit; font-size:.98rem; font-weight:600; cursor:pointer; width:100%; }
+.btn:hover { border-color:#22d3ee; }
+.two { display:grid; grid-template-columns: 1fr 1fr; gap:14px; margin-top:16px; }
+.info { background: rgba(8,51,68,.35); border:1px solid rgba(34,211,238,.25); border-radius:10px; padding:14px 16px; color:#bae6fd; }
+@media (max-width: 900px) { .layout, .cg-grid, .cg-stats, .two { grid-template-columns: 1fr; } .wrap { padding: 20px 16px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="cg-header">
+    <div class="cg-brand">
+      <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.7-7 9-4-1.3-7-4.5-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>
+      <div><div class="cg-title"><span>ClaimGuard</span> AI Insurance Auditor</div>
+      <div class="cg-sub">Healthcare Claim Audit System • Powered by Claude</div></div>
+    </div>
+    <span id="badge" class="cg-badge rule">● Rule-Based Mode</span>
+  </div>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="claim">🧾 Single Claim</button>
+    <button class="tab" data-tab="items">📋 Line Items</button>
+    <button class="tab" data-tab="policy">📜 Policy Evidence</button>
+    <button class="tab" data-tab="report">📤 Report &amp; Export</button>
+  </nav>
+
+  <section class="panel active" id="panel-claim">
+    <div class="layout">
+      <div>
+        <div class="cg-section">⚡ Select Scenario</div>
+        <div id="scenarios"></div>
+        <button class="scenario" data-key="upload"><b>📄 Upload Your Documents</b><small>Audit your own hospital bill (PDF, TXT, or photo) against your policy with Claude</small></button>
+        <div class="upload" id="upload">
+          <label for="bill">Hospital bill (PDF, TXT, PNG, JPG)</label>
+          <input type="file" id="bill" accept=".pdf,.txt,.png,.jpg,.jpeg">
+          <label for="policy">Insurance policy (text PDF or TXT)</label>
+          <input type="file" id="policy" accept=".pdf,.txt">
+          <label for="days">Covered inpatient days</label>
+          <input type="number" id="days" min="0" max="365" value="0">
+          <div class="hint">Leave at 0 to detect the stay from the admission and discharge dates on the bill. Combined upload limit: 4 MB.</div>
+          <div class="warn" id="ai-warn" style="display:none">The server has no ANTHROPIC_API_KEY configured, so uploaded documents can't be audited.</div>
+        </div>
+        <button class="analyze" id="analyze">▷&nbsp; Analyze Claim</button>
+        <div class="progress" id="progress"></div>
+        <div class="error" id="error"></div>
+      </div>
+      <div id="results">
+        <div class="cg-card cg-empty"><div class="big">🛡️</div><div class="cg-value" style="font-size:1.15rem;margin:8px 0">No claim analysed yet</div>
+        Pick a demo scenario or upload a hospital bill and policy, then click <b>Analyze Claim</b>.<br>
+        ClaimGuard flags duplicates, arithmetic errors, padded totals, room-rent cap breaches, and excluded services, and cites the policy clause behind each one.</div>
+      </div>
+    </div>
+  </section>
+  <section class="panel" id="panel-items"><div class="info">Run an analysis to see the extracted bill line items.</div></section>
+  <section class="panel" id="panel-policy"><div class="info">Run an analysis to see the policy clauses used.</div></section>
+  <section class="panel" id="panel-report"><div class="info">Run an analysis to review findings and export the report.</div></section>
+</div>
+
+<script>
+const TAGS = { arithmetic: "ARITHMETIC_MISMATCH", duplicate: "DUPLICATE_CHARGE", room_limit: "ROOM_RENT_CAP",
+               excluded_service: "EXCLUDED_SERVICE", total_mismatch: "BILL_TOTAL_MISMATCH" };
+const STATUSES = ["Needs review", "Confirmed by auditor", "Dismissed by auditor", "Needs more evidence"];
+const MAX_UPLOAD = 4 * 1024 * 1024;  // Vercel rejects request bodies above 4.5 MB
+const $ = (id) => document.getElementById(id);
+const esc = (v) => (v === null || v === undefined || v === "" ? "—" : String(v))
+  .replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const inr = (x) => "₹" + Number(x || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const tag = (c) => TAGS[c] || String(c).toUpperCase();
+let status = { ai_ready: false, model: "" }, choice = null, current = null, isLive = false;
+
+document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => {
+  document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === t));
+  document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === "panel-" + t.dataset.tab));
+}));
+
+function select(key) {
+  choice = key;
+  document.querySelectorAll(".scenario").forEach((b) => b.classList.toggle("selected", b.dataset.key === key));
+  $("upload").classList.toggle("show", key === "upload");
+  refreshButton();
+}
+function refreshButton() {
+  const ready = choice !== "upload" || (status.ai_ready && $("bill").files.length && $("policy").files.length);
+  $("analyze").disabled = !choice || !ready;
+}
+["bill", "policy"].forEach((id) => $(id).addEventListener("change", refreshButton));
+
+function setBadge() {
+  const b = $("badge");
+  if (current && isLive) { b.className = "cg-badge ai"; b.textContent = "● Claude AI Mode · " + status.model; }
+  else if (!current && status.ai_ready) { b.className = "cg-badge ai"; b.textContent = "● Claude Ready"; }
+  else { b.className = "cg-badge rule"; b.textContent = "● Rule-Based Mode"; }
+}
+
+async function init() {
+  const [st, scen] = await Promise.all([fetch("/api/status").then((r) => r.json()), fetch("/api/scenarios").then((r) => r.json())]);
+  status = st;
+  $("ai-warn").style.display = status.ai_ready ? "none" : "block";
+  $("scenarios").innerHTML = scen.map((s) => `<button class="scenario" data-key="${esc(s.key)}"><b>${esc(s.title)}</b><small>${esc(s.subtitle)}</small></button>`).join("");
+  document.querySelectorAll(".scenario").forEach((b) => b.addEventListener("click", () => select(b.dataset.key)));
+  select(scen[0].key);
+  setBadge();
+}
+
+$("analyze").addEventListener("click", async () => {
+  $("error").style.display = "none";
+  $("analyze").disabled = true;
+  try {
+    let res;
+    if (choice === "upload") {
+      const bill = $("bill").files[0], policy = $("policy").files[0];
+      if (bill.size + policy.size > MAX_UPLOAD) throw new Error("The two files together exceed 4 MB. Compress or split them and retry.");
+      const form = new FormData();
+      form.append("bill", bill); form.append("policy", policy); form.append("covered_days", $("days").value || "0");
+      $("progress").textContent = "📄 Reading documents and asking Claude to extract line items and policy clauses… this can take up to a minute.";
+      res = await fetch("/api/audit", { method: "POST", body: form });
+    } else {
+      $("progress").textContent = "⚙️ Running the rule engine…";
+      res = await fetch("/api/scenarios/" + encodeURIComponent(choice));
+    }
+    const body = await res.json().catch(() => ({ detail: `Server error (${res.status}).` }));
+    if (!res.ok) throw new Error(body.detail || `Server error (${res.status}).`);
+    current = body; isLive = choice === "upload";
+    render();
+    $("progress").textContent = isLive ? `Audit complete: ${body.report.finding_count} issue(s) found.` : "";
+  } catch (err) {
+    $("progress").textContent = "";
+    $("error").textContent = err.message;
+    $("error").style.display = "block";
+  } finally {
+    refreshButton();
+  }
+});
+
+function claimDetails(r) {
+  const info = r.claim_info || {};
+  const stay = info.admission_date ? `${esc(info.admission_date)} → ${esc(info.discharge_date)}` : esc(info.bill_date);
+  const cats = [...new Set(r.bill_items.map((i) => i.category))].sort();
+  const items = r.bill_items.slice(0, 12).map((i) => `<span class="cg-chip purple">${esc(i.description)}</span>`).join("")
+    + (r.bill_items.length > 12 ? `<span class="cg-chip">+${r.bill_items.length - 12} more</span>` : "");
+  return `<div class="cg-card"><h3>Claim Details</h3><div class="cg-grid">
+    <div><span class="cg-label">Claim ID:</span> <span class="cg-value cg-mono">${esc(info.invoice_number)}</span></div>
+    <div><span class="cg-label">Provider:</span> <span class="cg-value">${esc(info.provider)}</span></div>
+    <div><span class="cg-label">Stay:</span> <span class="cg-value">${stay}</span></div>
+    <div><span class="cg-label">Billed:</span> <span class="cg-amount">${inr(r.total_billed)}</span></div>
+    <div><span class="cg-label">Covered days:</span> <span class="cg-value">${esc(r.covered_days_assumed)}</span> <span class="cg-label">(${esc(r.covered_days_source)})</span></div>
+    <div><span class="cg-label">Policy:</span> <span class="cg-value">${esc(info.policy_name)}</span></div></div>
+    <div class="cg-label" style="margin-top:16px">Service categories:</div><div class="cg-chips">${cats.map((c) => `<span class="cg-chip">${esc(c)}</span>`).join("")}</div>
+    <div class="cg-label">Line items (${r.bill_items.length}):</div><div class="cg-chips">${items}</div></div>`;
+}
+
+function ruleEngine(r) {
+  const f = r.findings;
+  if (!f.length) return `<div class="cg-card sev-clear"><h3><span>✅ Rule Engine Analysis</span><span class="cg-risk CLEAR">CLEAR</span></h3>
+    <div class="cg-desc">No duplicates, arithmetic errors, bill-total mismatch, room-cap breaches, or excluded services were detected.</div></div>`;
+  const overall = f.some((x) => x.severity === "High") ? "High" : f.some((x) => x.severity === "Medium") ? "Medium" : "Low";
+  const rows = f.map((x) => {
+    let ev = `<div class="cg-ev"><b>Calculation</b> <code>${esc(x.calculation)}</code></div>`;
+    if (x.policy_quote) ev += `<div class="cg-ev"><b>Policy clause</b> (page ${esc(x.policy_page)})<div class="cg-quote">“${esc(x.policy_quote)}”</div></div>`;
+    else ev += `<div class="cg-ev"><b>Bill evidence</b> ${esc(x.evidence_quote)} <span class="cg-label">· bill page ${esc((x.bill_pages || []).filter((p) => p != null).join(", "))}</span></div>`;
+    if ((x.related_items || []).length) ev += `<div class="cg-ev"><b>Related lines</b> ${esc(x.related_items.join(", "))}</div>`;
+    ev += `<div class="cg-ev"><b>Method</b> ${esc(x.source)} · <b>Confidence</b> ${esc(x.confidence)}</div>`;
+    return `<div class="cg-finding"><div class="cg-frow"><span class="cg-tag">${esc(tag(x.category))}</span>
+      <span class="cg-sev ${esc(x.severity)}">${esc(x.severity).toUpperCase()}</span><span class="cg-label">${esc(x.id)}</span><span class="cg-exp">${inr(x.potential_exposure)}</span></div>
+      <div class="cg-desc"><b>${esc(x.title)}.</b> ${esc(x.description)}</div><details><summary>Evidence &amp; calculation</summary>${ev}</details></div>`;
+  }).join("");
+  return `<div class="cg-card sev-${overall === "High" ? "high" : "medium"}"><h3><span>⚠️ Rule Engine Analysis · ${f.length} issue${f.length !== 1 ? "s" : ""}</span>
+    <span class="cg-risk ${overall.toUpperCase()}">${overall.toUpperCase()}</span></h3>${rows}</div>`;
+}
+
+function stats(r, v) {
+  return `<div class="cg-stats">
+    <div class="cg-stat"><div class="cg-label">Total billed</div><div class="n">${inr(r.total_billed)}</div></div>
+    <div class="cg-stat"><div class="cg-label">Issues found</div><div class="n">${r.finding_count}</div></div>
+    <div class="cg-stat"><div class="cg-label">Potential overpayment</div><div class="n red">${inr(r.potential_exposure)}</div></div>
+    <div class="cg-stat"><div class="cg-label">Recommended payable</div><div class="n green">${inr(v.recommended_payable)}</div></div></div>`;
+}
+
+function verdictCard(r, v) {
+  let body = `<div class="cg-label">Recommended Action</div><div class="cg-action ${v.risk_level}">${esc(v.recommended_action)}</div>
+    <div class="cg-label">Audit Reasoning</div><div class="cg-p">${esc(v.reasoning)}</div>`;
+  if (isLive && r.reviewer_summary) body += `<div class="cg-label">Claude's Read of the Documents</div><div class="cg-p">${esc(r.reviewer_summary)}</div>`;
+  if (v.citations.length) body += `<div class="cg-label">Supporting Policy Clauses</div>` +
+    v.citations.map((c) => `<div class="cg-quote">“${esc(c.quote)}” <span class="cg-label">— policy page ${esc(c.page)}</span></div>`).join("");
+  const obs = r.observations || [];
+  if (obs.length) body += `<div class="cg-label" style="margin-top:14px">AI-Flagged Observations (unverified, not priced)</div>` + obs.map((o) => {
+    const sev = String(o.severity || "low");
+    return `<div class="cg-finding"><div class="cg-frow"><span class="cg-tag ai">AI_OBSERVATION</span><span class="cg-sev ${esc(sev[0].toUpperCase() + sev.slice(1))}">${esc(sev.toUpperCase())}</span></div>
+      <div class="cg-desc"><b>${esc(o.title)}.</b> ${esc(o.detail)}</div></div>`;
+  }).join("");
+  if (!isLive) body += `<div class="cg-label" style="margin-top:12px">Rule-based verdict. Upload documents to add Claude's extraction, summary, and observations.</div>`;
+  return `<div class="cg-card ai"><h3><span>${isLive ? "🧠 Claude AI Analysis" : "🧠 Audit Verdict"}</span><span style="display:flex;gap:12px;align-items:center">
+    <span class="cg-risk ${v.risk_level}">${v.risk_level}</span><span class="cg-pill">${Math.round(v.overpayment_share * 100)}% of bill flagged</span></span></h3>${body}</div>`;
+}
+
+function lineItems(r) {
+  const flags = {};
+  r.findings.forEach((f) => (f.related_indices || []).forEach((i) => (flags[i] = flags[i] || []).push(`${f.id} ${tag(f.category)}`)));
+  const rows = r.bill_items.map((it, n) => `<tr class="${flags[n] ? "flagged" : ""}"><td>${n + 1}</td><td>${esc(it.description)}</td><td>${esc(it.service_date)}</td>
+    <td class="num">${Number(it.quantity)}</td><td class="num">${inr(it.unit_price)}</td><td class="num">${inr(it.total)}</td><td>${esc(it.category)}</td>
+    <td>${esc(it.page)}</td><td>${flags[n] ? esc(flags[n].join(", ")) : ""}</td></tr>`).join("");
+  return `<div class="cg-card"><table><thead><tr><th>#</th><th>Description</th><th>Date</th><th>Qty</th><th>Unit price</th><th>Total</th><th>Category</th><th>Page</th><th>Flags</th></tr></thead>
+    <tbody>${rows}</tbody></table></div><div class="caption">${r.bill_items.length} line items · ${Object.keys(flags).length} flagged (highlighted). Live audits use AI-extracted lines; verify them against the original bill.</div>`;
+}
+
+function policyEvidence(r) {
+  const rules = r.policy_rules_used || [];
+  let out = rules.length ? `<div class="cg-section" style="font-size:1rem">Verified policy clauses applied by the rule engine</div>` + rules.map((rule) =>
+    `<div class="cg-card" style="padding:16px 20px"><div class="cg-frow"><span class="cg-tag rule">${esc(String(rule.rule_type).toUpperCase())}</span>
+     <span class="cg-label">page ${esc(rule.page)}${rule.amount_limit ? " · limit " + inr(rule.amount_limit) + "/day" : ""} · confidence ${esc(rule.confidence)}</span></div>
+     <div class="cg-desc">${esc(rule.description)}</div><div class="cg-quote">“${esc(rule.quote)}”</div></div>`).join("")
+    : `<div class="info">No verifiable room-cap or exclusion clauses were found in the policy, so only bill-internal checks ran.</div>`;
+  out += `<div class="cg-section" style="font-size:1rem;margin-top:20px">Audit notes</div><ul>${(r.audit_notes || []).map((n) => `<li class="cg-desc">${esc(n)}</li>`).join("")}</ul>`;
+  return out;
+}
+
+function reportPanel(r) {
+  const f = r.findings;
+  const table = f.length ? `<div class="cg-card"><div class="cg-label">Reviewer decisions: set a status for each finding before exporting.</div><table>
+    <thead><tr><th>ID</th><th>Severity</th><th>Type</th><th>Finding</th><th>Exposure</th><th>Status</th></tr></thead><tbody>${f.map((x, i) =>
+      `<tr><td>${esc(x.id)}</td><td class="cg-sev ${esc(x.severity)}">${esc(x.severity)}</td><td class="cg-mono">${esc(tag(x.category))}</td><td>${esc(x.title)}</td>
+       <td class="num">${inr(x.potential_exposure)}</td><td><select data-i="${i}">${STATUSES.map((s) => `<option${s === x.review_status ? " selected" : ""}>${s}</option>`).join("")}</select></td></tr>`).join("")}
+    </tbody></table></div>` : `<div class="info">No findings to review.</div>`;
+  return `${table}<div class="two"><button class="btn" id="dl-json">⬇️ Download full JSON report</button><button class="btn" id="dl-csv">⬇️ Download findings CSV</button></div>
+    <p class="caption">${esc(r.disclaimer)}</p>`;
+}
+
+function download(name, type, text) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.download = name; a.click(); URL.revokeObjectURL(a.href);
+}
+function exportFindings() {
+  return current.report.findings.map(({ related_indices, ...f }) => f);
+}
+
+function render() {
+  const r = current.report, v = current.verdict;
+  $("results").innerHTML = claimDetails(r) + ruleEngine(r) + stats(r, v) + verdictCard(r, v) +
+    `<div class="caption">${esc(r.source_mode)} · Generated ${esc(r.created_at.slice(0, 19).replace("T", " "))} UTC · Findings are review leads, not determinations of fraud or coverage.</div>`;
+  $("panel-items").innerHTML = lineItems(r);
+  $("panel-policy").innerHTML = policyEvidence(r);
+  $("panel-report").innerHTML = reportPanel(r);
+  document.querySelectorAll("#panel-report select").forEach((s) => s.addEventListener("change", () => { r.findings[+s.dataset.i].review_status = s.value; }));
+  $("dl-json").addEventListener("click", () => download("claimguard_audit_report.json", "application/json",
+    JSON.stringify({ ...r, findings: exportFindings(), verdict: v }, null, 2)));
+  $("dl-csv").addEventListener("click", () => {
+    const cols = ["id", "severity", "category", "title", "description", "potential_exposure", "confidence", "review_status", "calculation", "policy_quote", "policy_page", "evidence_quote"];
+    const cell = (x) => `"${String(x ?? "").replace(/"/g, '""')}"`;
+    download("claimguard_findings.csv", "text/csv", [cols.join(","), ...exportFindings().map((f) => cols.map((c) => cell(f[c])).join(","))].join("\n"));
+  });
+  setBadge();
+}
+
+init().catch(() => { $("error").textContent = "Could not reach the ClaimGuard API."; $("error").style.display = "block"; });
+</script>
+</body>
+</html>

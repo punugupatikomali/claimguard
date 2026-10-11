@@ -8,9 +8,10 @@ import os
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
-from audit_engine import build_audit_report, assess_report
-from document_reader import read_document, DocumentReadError
-from claude_auditor import analyze_documents, model_name, ClaudeAuditError
+from audit_engine import assess_report
+from document_reader import DocumentReadError
+from claude_auditor import model_name, ClaudeAuditError
+from pipeline import audit_documents
 from scenarios import SCENARIOS, run_scenario
 
 load_dotenv()
@@ -214,29 +215,8 @@ def render_verdict(r: dict, verdict: dict, is_live: bool) -> None:
 def run_live_audit(bill_file, policy_file, covered_days: int) -> None:
     with st.status("Auditing claim…", expanded=True) as status:
         try:
-            st.write("📄 Reading documents…")
-            bill = read_document(bill_file.name, bill_file.getvalue())
-            policy = read_document(policy_file.name, policy_file.getvalue(), allow_images=False)
-            source = f"{len(bill.images)} page image(s)" if bill.is_visual else "bill text"
-            st.write(f"🧠 Claude ({model_name()}) is extracting line items and policy clauses from the {source}…")
-            parsed = analyze_documents(bill, policy)
-            st.write("⚙️ Running the rule engine…")
-            notes = list(parsed.notes)
-            if bill.is_visual:
-                notes.append("The bill was read from page images with Claude vision. Check extracted amounts against the original.")
-            for doc in (bill, policy):
-                if doc.truncated:
-                    notes.append(f"{doc.filename} was longer than the text limit and was truncated; later pages were not audited.")
-            claim_info = parsed.claim_info.model_dump()
-            claim_info["policy_name"] = policy_file.name
-            result = build_audit_report(
-                bill_items=[item.model_dump() for item in parsed.bill_items],
-                policy_rules=[rule.model_dump() for rule in parsed.policy_rules],
-                covered_days=covered_days or None, policy_text=policy.text, notes=notes,
-                source_mode=f"Claude API · {model_name()}", claim_info=claim_info,
-                observations=[o.model_dump() for o in parsed.observations],
-            )
-            result["reviewer_summary"] = parsed.reviewer_summary
+            result = audit_documents(bill_file.name, bill_file.getvalue(), policy_file.name, policy_file.getvalue(),
+                                     covered_days, progress=st.write)
             st.session_state.report, st.session_state.live = result, True
             status.update(label=f"Audit complete: {result['finding_count']} issue(s) found", state="complete", expanded=False)
         except (DocumentReadError, ClaudeAuditError) as exc:
