@@ -93,6 +93,13 @@ def analyze_documents(bill: DocumentContent, policy: DocumentContent) -> Extract
     if not api_key:
         raise ClaudeAuditError("ANTHROPIC_API_KEY is missing. Add it to your local .env file, or use the demo scenarios without API credits.")
 
+    for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_MODEL"):
+        value = os.getenv(name, "")
+        bad = next((i for i, ch in enumerate(value) if not ch.isascii()), None)
+        if bad is not None:
+            raise ClaudeAuditError(f"{name} contains a non-ASCII character (e.g. an en dash '–' instead of '-') at position {bad}. "
+                                   "Re-type or re-paste the value as plain text and redeploy.")
+
     # Import only when needed so the demo scenarios remain usable without the SDK installed.
     try:
         import anthropic
